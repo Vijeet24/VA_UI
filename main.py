@@ -21,7 +21,7 @@ def main():
     st.title("🎙️ Voice Assistant Interface - I-CPS Lab, Polytechnique Montréal")
 
     # Define CSV path
-    local_csv_path = r"C:/Users/ACER/langchain-ask-csv/data.csv"
+    local_csv_path = "data.csv"
 
     # ---
     # NEW: Initialize the agent AND the chat history in the same place.
@@ -94,3 +94,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
