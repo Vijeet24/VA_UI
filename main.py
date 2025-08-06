@@ -91,7 +91,7 @@ def main():
             st.markdown("---")
             st.write("Click to record your question:")
             
-            audio_input = mic_recorder(start_prompt="⏺️ Ask Question, stop_prompt="⏹️ Question complete", just_once=True, key="recorder")
+            audio_input = mic_recorder(start_prompt="⏺️ Ask Question", stop_prompt="⏹️ Question complete", just_once=True, key="recorder")
 
             if 'new_audio_transcription' not in st.session_state:
                 st.session_state.new_audio_transcription = None
@@ -153,6 +153,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
