@@ -1,0 +1,16 @@
+streamlit
+pandas
+python-dotenv
+langchain
+langchain-community
+langchain-experimental
+openai
+tabulate
+langchain-openai
+openai
+gtts
+streamlit-mic-recorder
+audio-recorder-streamlit
+
+
+
