@@ -5,8 +5,9 @@ from dotenv import load_dotenv
 import streamlit as st
 import pandas as pd
 import os
-import time
-import threading
+
+# To address the LangChainDeprecationWarning
+from langchain_openai import OpenAI as LangchainOpenAI
 
 def load_csv_data(path):
     try:
@@ -25,44 +26,40 @@ def main():
 
     # ---
     # NEW: Initialize the agent AND the chat history in the same place.
-    # We will also add an `else` block to show an error if the CSV is missing.
     # ---
 
     if 'agent' not in st.session_state:
         if os.path.exists(local_csv_path):
             st.session_state.memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
+            # Using the new OpenAI class to address the deprecation warning
             st.session_state.agent = create_csv_agent(
-                llm=OpenAI(temperature=0),
+                llm=LangchainOpenAI(temperature=0),
                 path=local_csv_path,
                 verbose=False,
-                memory=st.session_state.memory,
                 allow_dangerous_code=True
             )
-            # Initialize chat history here, as it's part of the agent's state
+            # The memory parameter is deprecated in create_csv_agent, so we will manage it manually
+            # in the chat logic
             st.session_state.chat_history = []
         else:
             st.error(f"Could not find the CSV file at: {local_csv_path}. Please check the path.")
-            st.session_state.agent = None # Set agent to None to prevent subsequent errors
+            st.session_state.agent = None
 
     # Layout: Left = Live Data View, Right = Chat Interface
     col1, col2 = st.columns([1, 2])
 
     # Left: Live Data Viewer
     with col1:
-        st.subheader("📊 Live CSV Data (Auto-updating)")
-        data_placeholder = st.empty()
+        st.subheader("📊 Live CSV Data")
 
-        def update_csv_data():
-            while True:
-                df = load_csv_data(local_csv_path)
-                if df is not None:
-                    data_placeholder.dataframe(df)
-                time.sleep(1)
+        # Load the data directly in the main script thread
+        df = load_csv_data(local_csv_path)
+        if df is not None:
+            st.dataframe(df)
 
-        if 'thread_started' not in st.session_state:
-            if st.session_state.agent is not None:
-                threading.Thread(target=update_csv_data, daemon=True).start()
-                st.session_state.thread_started = True
+        # You can add a button to manually refresh the data
+        if st.button("Refresh Data"):
+            st.rerun()
 
     # Right: Continuous Chat
     with col2:
@@ -70,20 +67,25 @@ def main():
 
         # Only display the chat interface if the agent was successfully initialized
         if st.session_state.agent is not None:
-            user_input = st.text_input("Ask something about the CSV data:", key="chat_input")
-            
+            # Use the new st.chat_input widget
+            user_input = st.chat_input("Ask something about the CSV data:")
+
             # Display past conversation
             for sender, message in st.session_state.chat_history:
                 if sender == "You":
-                    st.markdown(f"**🧑 You:** {message}")
+                    with st.chat_message("user"):
+                        st.markdown(message)
                 else:
-                    st.markdown(f"**🤖 Assistant:** {message}")
+                    with st.chat_message("assistant"):
+                        st.markdown(message)
 
             if user_input:
                 with st.spinner("Thinking..."):
                     try:
-                        response = st.session_state.agent.run(user_input)
+                        # Append the user message to the history first
                         st.session_state.chat_history.append(("You", user_input))
+                        # Use the agent's memory (which is now part of the LLM call)
+                        response = st.session_state.agent.run(user_input, memory=st.session_state.memory)
                         st.session_state.chat_history.append(("Assistant", response))
                         # Rerun the app to show the new messages
                         st.rerun()
