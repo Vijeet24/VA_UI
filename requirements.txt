@@ -7,5 +7,8 @@ langchain-experimental
 openai
 tabulate
 langchain-openai
+openai
+gtts
+streamlit-mic-recorder
 
 
