@@ -42,14 +42,15 @@ def initialize_agent_and_history(csv_path):
 
 def text_to_audio(text):
     """
-    Converts text to speech and plays it.
+    Converts text to speech and plays it using an in-memory buffer.
     """
     try:
         tts = gTTS(text, lang='en')
-        tts.save("response.mp3")
-        with open("response.mp3", "rb") as f:
-            audio_bytes = f.read()
-        st.audio(audio_bytes, format='audio/mp3', autoplay=True, loop=False)
+        # Use a BytesIO buffer to store the audio in memory instead of a file
+        audio_bytes_io = io.BytesIO()
+        tts.write_to_fp(audio_bytes_io)
+        audio_bytes_io.seek(0)
+        st.audio(audio_bytes_io, format='audio/mp3', autoplay=True, loop=False)
     except Exception as e:
         st.warning(f"Text-to-speech failed: {e}")
 
@@ -138,6 +139,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
