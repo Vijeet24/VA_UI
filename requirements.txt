@@ -6,4 +6,6 @@ langchain-community
 langchain-experimental
 openai
 tabulate
+langchain-openai
+
 
