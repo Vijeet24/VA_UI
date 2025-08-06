@@ -6,8 +6,10 @@ import pandas as pd
 import os
 import io
 from gtts import gTTS
-from streamlit_mic_recorder import mic_recorder
 from openai import OpenAI
+from audio_recorder_streamlit import audio_recorder # New import
+
+# ... (load_csv_data, initialize_agent_and_history, and text_to_audio functions are the same) ...
 
 def load_csv_data(path):
     """
@@ -89,15 +91,25 @@ def main():
                         st.markdown(message)
             
             st.markdown("---")
-            st.write("Click to record your question:")
+            st.write("Click to start recording your question. Recording will stop automatically after a pause.")
             
-            audio_input = mic_recorder(start_prompt="⏺️ Start recording", stop_prompt="⏹️ Stop recording", just_once=True, key="recorder")
+            # --- MODIFIED AUDIO INPUT LOGIC ---
+            # Use audio_recorder with automatic stop parameters
+            audio_bytes = audio_recorder(
+                text="Record Audio",
+                # The energy threshold for silence detection
+                energy_threshold=(-1.0, 1.0),
+                # The number of seconds of silence to automatically stop the recording
+                pause_threshold=2.0
+            )
+            # --- END MODIFIED AUDIO INPUT LOGIC ---
 
+            # Initialize a flag to check if we have a new transcription
             if 'new_audio_transcription' not in st.session_state:
                 st.session_state.new_audio_transcription = None
 
             # Step 1: Transcribe the audio and store the result
-            if audio_input and st.session_state.new_audio_transcription is None:
+            if audio_bytes and st.session_state.new_audio_transcription is None:
                 try:
                     with st.spinner("Transcribing your audio..."):
                         client = st.session_state.get('openai_client')
@@ -105,7 +117,7 @@ def main():
                             client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
                             st.session_state.openai_client = client
 
-                        audio_file = io.BytesIO(audio_input['bytes'])
+                        audio_file = io.BytesIO(audio_bytes)
                         audio_file.name = "user_audio.wav"
                         
                         transcript = client.audio.transcriptions.create(
@@ -122,32 +134,18 @@ def main():
                 user_input = st.session_state.new_audio_transcription
                 st.session_state.chat_history.append(("You", user_input))
                 st.session_state.new_audio_transcription = None
-
+                
                 with st.spinner("Thinking..."):
                     try:
                         response = st.session_state.agent.invoke({"input": user_input})
-                        
                         st.session_state.chat_history.append(("Assistant", response['output']))
                         
-                        # --- MODIFIED AUDIO LOGIC ---
-                        # Use a dedicated session state variable to hold the audio bytes
-                        tts = gTTS(response['output'], lang='en')
-                        audio_bytes_io = io.BytesIO()
-                        tts.write_to_fp(audio_bytes_io)
-                        audio_bytes_io.seek(0)
-                        st.session_state.audio_bytes = audio_bytes_io.getvalue()
-                        # --- END MODIFIED AUDIO LOGIC ---
-
+                        # Use the text_to_audio function to handle TTS
+                        text_to_audio(response['output'])
+                        
                         st.rerun()
                     except Exception as e:
                         st.error(f"Error: {e}")
-            
-            # --- NEW: Play the audio on the final rerun ---
-            if 'audio_bytes' in st.session_state and st.session_state.audio_bytes:
-                st.audio(st.session_state.audio_bytes, format='audio/mp3', autoplay=True, loop=False)
-                st.session_state.audio_bytes = None  # Clear the audio after playing
-            # --- END NEW LOGIC ---
-
         else:
             st.warning("Chat functionality is disabled because the CSV file was not found.")
 
