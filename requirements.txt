@@ -10,5 +10,7 @@ langchain-openai
 openai
 gtts
 streamlit-mic-recorder
+audio-recorder-streamlit
+
 
 
