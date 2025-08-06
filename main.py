@@ -91,10 +91,8 @@ def main():
             st.markdown("---")
             st.write("Click to record your question:")
             
-            # Use `just_once=True` to prevent reprocessing audio on reruns
             audio_input = mic_recorder(start_prompt="⏺️ Start recording", stop_prompt="⏹️ Stop recording", just_once=True, key="recorder")
 
-            # Initialize a flag to check if we have a new transcription
             if 'new_audio_transcription' not in st.session_state:
                 st.session_state.new_audio_transcription = None
 
@@ -108,7 +106,7 @@ def main():
                             st.session_state.openai_client = client
 
                         audio_file = io.BytesIO(audio_input['bytes'])
-                        audio_file.name = "user_audio.wav"  # Give the in-memory file a name
+                        audio_file.name = "user_audio.wav"
                         
                         transcript = client.audio.transcriptions.create(
                             model="whisper-1", 
@@ -123,19 +121,33 @@ def main():
             if st.session_state.new_audio_transcription:
                 user_input = st.session_state.new_audio_transcription
                 st.session_state.chat_history.append(("You", user_input))
-                st.session_state.new_audio_transcription = None  # Reset the flag
+                st.session_state.new_audio_transcription = None
 
                 with st.spinner("Thinking..."):
                     try:
-                        # Use the invoke method as recommended by LangChain
                         response = st.session_state.agent.invoke({"input": user_input})
                         
                         st.session_state.chat_history.append(("Assistant", response['output']))
-                        text_to_audio(response['output'])
                         
+                        # --- MODIFIED AUDIO LOGIC ---
+                        # Use a dedicated session state variable to hold the audio bytes
+                        tts = gTTS(response['output'], lang='en')
+                        audio_bytes_io = io.BytesIO()
+                        tts.write_to_fp(audio_bytes_io)
+                        audio_bytes_io.seek(0)
+                        st.session_state.audio_bytes = audio_bytes_io.getvalue()
+                        # --- END MODIFIED AUDIO LOGIC ---
+
                         st.rerun()
                     except Exception as e:
                         st.error(f"Error: {e}")
+            
+            # --- NEW: Play the audio on the final rerun ---
+            if 'audio_bytes' in st.session_state and st.session_state.audio_bytes:
+                st.audio(st.session_state.audio_bytes, format='audio/mp3', autoplay=True, loop=False)
+                st.session_state.audio_bytes = None  # Clear the audio after playing
+            # --- END NEW LOGIC ---
+
         else:
             st.warning("Chat functionality is disabled because the CSV file was not found.")
 
