@@ -4,12 +4,10 @@ from dotenv import load_dotenv
 import streamlit as st
 import pandas as pd
 import os
+import io
 from gtts import gTTS
-import base64
 from streamlit_mic_recorder import mic_recorder
 from openai import OpenAI
-
-# ... (load_csv_data, initialize_agent_and_history, and text_to_audio functions are the same) ...
 
 def load_csv_data(path):
     """
@@ -43,17 +41,17 @@ def initialize_agent_and_history(csv_path):
 def text_to_audio(text):
     """
     Converts text to speech and plays it using an in-memory buffer.
+    This fixes the MediaFileStorageError by not relying on a temporary file.
     """
     try:
         tts = gTTS(text, lang='en')
-        # Use a BytesIO buffer to store the audio in memory instead of a file
+        # Use a BytesIO buffer to store the audio in memory
         audio_bytes_io = io.BytesIO()
         tts.write_to_fp(audio_bytes_io)
         audio_bytes_io.seek(0)
         st.audio(audio_bytes_io, format='audio/mp3', autoplay=True, loop=False)
     except Exception as e:
         st.warning(f"Text-to-speech failed: {e}")
-
 
 def main():
     """
@@ -72,9 +70,11 @@ def main():
 
     with col1:
         st.subheader("📊 Live CSV Data")
+        
         df = load_csv_data(local_csv_path)
         if df is not None:
             st.dataframe(df)
+
         if st.button("Refresh Data"):
             st.rerun()
 
@@ -83,7 +83,6 @@ def main():
 
         if st.session_state.agent is not None:
             chat_container = st.container()
-
             with chat_container:
                 for sender, message in st.session_state.chat_history:
                     with st.chat_message(name=sender, avatar="🧑" if sender == "You" else "🤖"):
@@ -95,10 +94,11 @@ def main():
             # Use `just_once=True` to prevent reprocessing audio on reruns
             audio_input = mic_recorder(start_prompt="⏺️ Start recording", stop_prompt="⏹️ Stop recording", just_once=True, key="recorder")
 
-            # A flag to check if we have a new audio input to process
+            # Initialize a flag to check if we have a new transcription
             if 'new_audio_transcription' not in st.session_state:
                 st.session_state.new_audio_transcription = None
 
+            # Step 1: Transcribe the audio and store the result
             if audio_input and st.session_state.new_audio_transcription is None:
                 try:
                     with st.spinner("Transcribing your audio..."):
@@ -107,10 +107,9 @@ def main():
                             client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
                             st.session_state.openai_client = client
 
-                        with open("user_audio.wav", "wb") as f:
-                            f.write(audio_input['bytes'])
+                        audio_file = io.BytesIO(audio_input['bytes'])
+                        audio_file.name = "user_audio.wav"  # Give the in-memory file a name
                         
-                        audio_file = open("user_audio.wav", "rb")
                         transcript = client.audio.transcriptions.create(
                             model="whisper-1", 
                             file=audio_file
@@ -119,8 +118,8 @@ def main():
                         st.rerun()
                 except Exception as e:
                     st.error(f"Error transcribing audio: {e}")
-            
-            # This part handles the chatbot response after transcription is done
+
+            # Step 2: Run the agent with the transcribed text and get a response
             if st.session_state.new_audio_transcription:
                 user_input = st.session_state.new_audio_transcription
                 st.session_state.chat_history.append(("You", user_input))
@@ -128,9 +127,12 @@ def main():
 
                 with st.spinner("Thinking..."):
                     try:
-                        response = st.session_state.agent.run(user_input)
-                        st.session_state.chat_history.append(("Assistant", response))
-                        text_to_audio(response)
+                        # Use the invoke method as recommended by LangChain
+                        response = st.session_state.agent.invoke({"input": user_input})
+                        
+                        st.session_state.chat_history.append(("Assistant", response['output']))
+                        text_to_audio(response['output'])
+                        
                         st.rerun()
                     except Exception as e:
                         st.error(f"Error: {e}")
@@ -139,6 +141,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
