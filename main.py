@@ -7,6 +7,9 @@ import os
 from gtts import gTTS
 import base64
 from streamlit_mic_recorder import mic_recorder
+from openai import OpenAI
+
+# ... (load_csv_data, initialize_agent_and_history, and text_to_audio functions are the same) ...
 
 def load_csv_data(path):
     """
@@ -50,6 +53,7 @@ def text_to_audio(text):
     except Exception as e:
         st.warning(f"Text-to-speech failed: {e}")
 
+
 def main():
     """
     The main function for the Streamlit application.
@@ -60,55 +64,48 @@ def main():
 
     local_csv_path = "data.csv"
 
-    # Initialize the agent and history only once
     if 'agent' not in st.session_state:
         initialize_agent_and_history(local_csv_path)
 
-    # Layout: Left = Live Data View, Right = Chat Interface
     col1, col2 = st.columns([1, 2])
 
-    # Left: Live Data Viewer
     with col1:
         st.subheader("📊 Live CSV Data")
-        
         df = load_csv_data(local_csv_path)
         if df is not None:
             st.dataframe(df)
-
         if st.button("Refresh Data"):
             st.rerun()
 
-    # Right: Continuous Chat
     with col2:
         st.subheader("💬 Continuous Chat with CSV")
 
         if st.session_state.agent is not None:
-            # Create a placeholder for the chat messages
             chat_container = st.container()
 
             with chat_container:
                 for sender, message in st.session_state.chat_history:
                     with st.chat_message(name=sender, avatar="🧑" if sender == "You" else "🤖"):
                         st.markdown(message)
-                
-            # Audio input and chat logic
+            
             st.markdown("---")
             st.write("Click to record your question:")
             
-            audio_input = mic_recorder(start_prompt="⏺️ Start recording", stop_prompt="⏹️ Stop recording", key="recorder")
+            # Use `just_once=True` to prevent reprocessing audio on reruns
+            audio_input = mic_recorder(start_prompt="⏺️ Start recording", stop_prompt="⏹️ Stop recording", just_once=True, key="recorder")
 
-            if audio_input:
+            # A flag to check if we have a new audio input to process
+            if 'new_audio_transcription' not in st.session_state:
+                st.session_state.new_audio_transcription = None
+
+            if audio_input and st.session_state.new_audio_transcription is None:
                 try:
-                    # Speech-to-Text with OpenAI's Whisper API
-                    # Note: You need the 'openai' package for this.
-                    client = st.session_state.get('openai_client')
-                    if not client:
-                        from openai import OpenAI
-                        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-                        st.session_state.openai_client = client
-
                     with st.spinner("Transcribing your audio..."):
-                        # Save the recorded audio to a file
+                        client = st.session_state.get('openai_client')
+                        if not client:
+                            client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+                            st.session_state.openai_client = client
+
                         with open("user_audio.wav", "wb") as f:
                             f.write(audio_input['bytes'])
                         
@@ -117,24 +114,22 @@ def main():
                             model="whisper-1", 
                             file=audio_file
                         )
-                        user_input = transcript.text
-                        st.session_state.chat_history.append(("You", user_input))
+                        st.session_state.new_audio_transcription = transcript.text
                         st.rerun()
-
                 except Exception as e:
                     st.error(f"Error transcribing audio: {e}")
+            
+            # This part handles the chatbot response after transcription is done
+            if st.session_state.new_audio_transcription:
+                user_input = st.session_state.new_audio_transcription
+                st.session_state.chat_history.append(("You", user_input))
+                st.session_state.new_audio_transcription = None  # Reset the flag
 
-            # This part handles the chatbot response
-            if st.session_state.chat_history and st.session_state.chat_history[-1][0] == "You":
-                user_input = st.session_state.chat_history[-1][1]
                 with st.spinner("Thinking..."):
                     try:
                         response = st.session_state.agent.run(user_input)
                         st.session_state.chat_history.append(("Assistant", response))
-                        
-                        # Text-to-Speech for the response
                         text_to_audio(response)
-                        
                         st.rerun()
                     except Exception as e:
                         st.error(f"Error: {e}")
