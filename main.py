@@ -7,14 +7,10 @@ import os
 import io
 from gtts import gTTS
 from openai import OpenAI
-from audio_recorder_streamlit import audio_recorder # New import
-
-# ... (load_csv_data, initialize_agent_and_history, and text_to_audio functions are the same) ...
+from audio_recorder_streamlit import audio_recorder
 
 def load_csv_data(path):
-    """
-    Loads data from a local CSV file.
-    """
+    """Loads data from a local CSV file."""
     try:
         df = pd.read_csv(path)
         return df
@@ -23,9 +19,7 @@ def load_csv_data(path):
         return None
 
 def initialize_agent_and_history(csv_path):
-    """
-    Initializes the LangChain agent and chat history in Streamlit's session state.
-    """
+    """Initializes the LangChain agent and chat history in Streamlit's session state."""
     if os.path.exists(csv_path):
         st.session_state.agent = create_csv_agent(
             llm=LangchainOpenAI(temperature=0),
@@ -40,25 +34,8 @@ def initialize_agent_and_history(csv_path):
         st.session_state.agent = None
         return False
 
-def text_to_audio(text):
-    """
-    Converts text to speech and plays it using an in-memory buffer.
-    This fixes the MediaFileStorageError by not relying on a temporary file.
-    """
-    try:
-        tts = gTTS(text, lang='en')
-        # Use a BytesIO buffer to store the audio in memory
-        audio_bytes_io = io.BytesIO()
-        tts.write_to_fp(audio_bytes_io)
-        audio_bytes_io.seek(0)
-        st.audio(audio_bytes_io, format='audio/mp3', autoplay=True, loop=False)
-    except Exception as e:
-        st.warning(f"Text-to-speech failed: {e}")
-
 def main():
-    """
-    The main function for the Streamlit application.
-    """
+    """The main function for the Streamlit application."""
     load_dotenv()
     st.set_page_config(page_title="Voice Assistant | I-CPS Lab", layout="wide")
     st.title("🎙️ Voice Assistant Interface - I-CPS Lab, Polytechnique Montréal")
@@ -84,31 +61,32 @@ def main():
         st.subheader("💬 Continuous Chat with CSV")
 
         if st.session_state.agent is not None:
-            chat_container = st.container()
-            with chat_container:
-                for sender, message in st.session_state.chat_history:
-                    with st.chat_message(name=sender, avatar="🧑" if sender == "You" else "🤖"):
-                        st.markdown(message)
+            # Display chat history
+            for sender, message in st.session_state.chat_history:
+                with st.chat_message(name=sender, avatar="🧑" if sender == "You" else "🤖"):
+                    # Render the message
+                    st.markdown(message)
+                    # If the assistant's message, also play the audio from session state
+                    if sender == "Assistant" and "audio_bytes" in st.session_state and st.session_state.audio_bytes:
+                         st.audio(st.session_state.audio_bytes, format='audio/mp3')
+                         # Reset the audio bytes after it's displayed once
+                         st.session_state.audio_bytes = None
             
+            # Use audio_recorder with automatic stop parameters
             st.markdown("---")
             st.write("Click to start recording your question. Recording will stop automatically after a pause.")
-            
-            # --- MODIFIED AUDIO INPUT LOGIC ---
-            # Use audio_recorder with automatic stop parameters
             audio_bytes = audio_recorder(
                 text="Record Audio",
-                # The energy threshold for silence detection
                 energy_threshold=(-1.0, 1.0),
-                # The number of seconds of silence to automatically stop the recording
-                pause_threshold=2.0
+                pause_threshold=2.0,
+                key="audio_recorder_widget" # Added a key for stability
             )
-            # --- END MODIFIED AUDIO INPUT LOGIC ---
 
-            # Initialize a flag to check if we have a new transcription
+            # Initialize session state for transcription and audio
             if 'new_audio_transcription' not in st.session_state:
                 st.session_state.new_audio_transcription = None
 
-            # Step 1: Transcribe the audio and store the result
+            # Logic to handle a new recording
             if audio_bytes and st.session_state.new_audio_transcription is None:
                 try:
                     with st.spinner("Transcribing your audio..."):
@@ -129,19 +107,28 @@ def main():
                 except Exception as e:
                     st.error(f"Error transcribing audio: {e}")
 
-            # Step 2: Run the agent with the transcribed text and get a response
+            # Logic to handle the chatbot's response
             if st.session_state.new_audio_transcription:
                 user_input = st.session_state.new_audio_transcription
                 st.session_state.chat_history.append(("You", user_input))
-                st.session_state.new_audio_transcription = None
-                
+                st.session_state.new_audio_transcription = None  # Reset the transcription flag
+
                 with st.spinner("Thinking..."):
                     try:
                         response = st.session_state.agent.invoke({"input": user_input})
-                        st.session_state.chat_history.append(("Assistant", response['output']))
+                        response_text = response['output']
                         
-                        # Use the text_to_audio function to handle TTS
-                        text_to_audio(response['output'])
+                        # Generate the audio bytes and store in session state
+                        tts = gTTS(response_text, lang='en')
+                        audio_bytes_io = io.BytesIO()
+                        tts.write_to_fp(audio_bytes_io)
+                        audio_bytes_io.seek(0)
+                        
+                        # Store the audio bytes in a session state variable
+                        st.session_state.audio_bytes = audio_bytes_io.getvalue()
+                        
+                        # Append the text message to the chat history
+                        st.session_state.chat_history.append(("Assistant", response_text))
                         
                         st.rerun()
                     except Exception as e:
@@ -151,6 +138,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
