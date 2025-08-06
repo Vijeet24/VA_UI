@@ -1,15 +1,16 @@
 from langchain_experimental.agents import create_csv_agent
 from langchain_openai import OpenAI as LangchainOpenAI
-from langchain.memory import ConversationBufferMemory
 from dotenv import load_dotenv
 import streamlit as st
 import pandas as pd
 import os
+from gtts import gTTS
+import base64
+from streamlit_mic_recorder import mic_recorder
 
 def load_csv_data(path):
     """
     Loads data from a local CSV file.
-    Uses st.cache_data to cache the data, which prevents re-loading on every rerun.
     """
     try:
         df = pd.read_csv(path)
@@ -23,9 +24,6 @@ def initialize_agent_and_history(csv_path):
     Initializes the LangChain agent and chat history in Streamlit's session state.
     """
     if os.path.exists(csv_path):
-        # We will manage the memory manually as create_csv_agent does not
-        # support it directly in this version.
-        st.session_state.memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
         st.session_state.agent = create_csv_agent(
             llm=LangchainOpenAI(temperature=0),
             path=csv_path,
@@ -38,6 +36,19 @@ def initialize_agent_and_history(csv_path):
         st.error(f"Could not find the CSV file at: {csv_path}. Please check the path.")
         st.session_state.agent = None
         return False
+
+def text_to_audio(text):
+    """
+    Converts text to speech and plays it.
+    """
+    try:
+        tts = gTTS(text, lang='en')
+        tts.save("response.mp3")
+        with open("response.mp3", "rb") as f:
+            audio_bytes = f.read()
+        st.audio(audio_bytes, format='audio/mp3', autoplay=True, loop=False)
+    except Exception as e:
+        st.warning(f"Text-to-speech failed: {e}")
 
 def main():
     """
@@ -60,12 +71,10 @@ def main():
     with col1:
         st.subheader("📊 Live CSV Data")
         
-        # Load the data and display it in a dataframe
         df = load_csv_data(local_csv_path)
         if df is not None:
             st.dataframe(df)
 
-        # A button to manually refresh the data
         if st.button("Refresh Data"):
             st.rerun()
 
@@ -73,32 +82,59 @@ def main():
     with col2:
         st.subheader("💬 Continuous Chat with CSV")
 
-        # Only display the chat interface if the agent was successfully initialized
         if st.session_state.agent is not None:
-            # Display past conversation
-            for sender, message in st.session_state.chat_history:
-                if sender == "You":
-                    with st.chat_message("user"):
-                        st.markdown(message)
-                else:
-                    with st.chat_message("assistant"):
-                        st.markdown(message)
+            # Create a placeholder for the chat messages
+            chat_container = st.container()
 
-            # Use st.chat_input for a better user experience
-            user_input = st.chat_input("Ask something about the CSV data:")
+            with chat_container:
+                for sender, message in st.session_state.chat_history:
+                    with st.chat_message(name=sender, avatar="🧑" if sender == "You" else "🤖"):
+                        st.markdown(message)
+                
+            # Audio input and chat logic
+            st.markdown("---")
+            st.write("Click to record your question:")
+            
+            audio_input = mic_recorder(start_prompt="⏺️ Start recording", stop_prompt="⏹️ Stop recording", key="recorder")
 
-            if user_input:
+            if audio_input:
+                try:
+                    # Speech-to-Text with OpenAI's Whisper API
+                    # Note: You need the 'openai' package for this.
+                    client = st.session_state.get('openai_client')
+                    if not client:
+                        from openai import OpenAI
+                        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+                        st.session_state.openai_client = client
+
+                    with st.spinner("Transcribing your audio..."):
+                        # Save the recorded audio to a file
+                        with open("user_audio.wav", "wb") as f:
+                            f.write(audio_input['bytes'])
+                        
+                        audio_file = open("user_audio.wav", "rb")
+                        transcript = client.audio.transcriptions.create(
+                            model="whisper-1", 
+                            file=audio_file
+                        )
+                        user_input = transcript.text
+                        st.session_state.chat_history.append(("You", user_input))
+                        st.rerun()
+
+                except Exception as e:
+                    st.error(f"Error transcribing audio: {e}")
+
+            # This part handles the chatbot response
+            if st.session_state.chat_history and st.session_state.chat_history[-1][0] == "You":
+                user_input = st.session_state.chat_history[-1][1]
                 with st.spinner("Thinking..."):
                     try:
-                        # Append the user message to the history first
-                        st.session_state.chat_history.append(("You", user_input))
-                        
-                        # Run the agent without the unsupported 'memory' keyword argument
                         response = st.session_state.agent.run(user_input)
-                        
                         st.session_state.chat_history.append(("Assistant", response))
                         
-                        # Rerun the app to show the new messages
+                        # Text-to-Speech for the response
+                        text_to_audio(response)
+                        
                         st.rerun()
                     except Exception as e:
                         st.error(f"Error: {e}")
@@ -107,5 +143,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
