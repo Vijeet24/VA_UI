@@ -64,32 +64,26 @@ def main():
             # Display chat history
             for sender, message in st.session_state.chat_history:
                 with st.chat_message(name=sender, avatar="🧑" if sender == "You" else "🤖"):
-                    # Render the message
                     st.markdown(message)
-                    # If the assistant's message, also play the audio from session state
-                    if sender == "Assistant" and "audio_bytes" in st.session_state and st.session_state.audio_bytes:
-                         st.audio(st.session_state.audio_bytes, format='audio/mp3')
-                         # Reset the audio bytes after it's displayed once
-                         st.session_state.audio_bytes = None
-            
+
             # Use audio_recorder with automatic stop parameters
             st.markdown("---")
             st.write("Click to start recording your question. Recording will stop automatically after a pause.")
+            
+            # Key change: store audio_bytes in a dedicated session state variable
             audio_bytes = audio_recorder(
                 text="Record Audio",
                 energy_threshold=(-1.0, 1.0),
                 pause_threshold=2.0,
-                key="audio_recorder_widget" # Added a key for stability
+                key="audio_recorder_widget"
             )
 
-            # Initialize session state for transcription and audio
-            if 'new_audio_transcription' not in st.session_state:
-                st.session_state.new_audio_transcription = None
-
-            # Logic to handle a new recording
-            if audio_bytes and st.session_state.new_audio_transcription is None:
-                try:
-                    with st.spinner("Transcribing your audio..."):
+            # --- New Logic Flow ---
+            
+            # Step 1: Transcribe the audio if a new recording is present
+            if audio_bytes:
+                with st.spinner("Transcribing your audio..."):
+                    try:
                         client = st.session_state.get('openai_client')
                         if not client:
                             client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -102,42 +96,41 @@ def main():
                             model="whisper-1", 
                             file=audio_file
                         )
-                        st.session_state.new_audio_transcription = transcript.text
-                        st.rerun()
-                except Exception as e:
-                    st.error(f"Error transcribing audio: {e}")
-
-            # Logic to handle the chatbot's response
-            if st.session_state.new_audio_transcription:
-                user_input = st.session_state.new_audio_transcription
-                st.session_state.chat_history.append(("You", user_input))
-                st.session_state.new_audio_transcription = None  # Reset the transcription flag
-
-                with st.spinner("Thinking..."):
-                    try:
-                        response = st.session_state.agent.invoke({"input": user_input})
-                        response_text = response['output']
+                        user_input = transcript.text
+                        st.session_state.chat_history.append(("You", user_input))
                         
-                        # Generate the audio bytes and store in session state
-                        tts = gTTS(response_text, lang='en')
-                        audio_bytes_io = io.BytesIO()
-                        tts.write_to_fp(audio_bytes_io)
-                        audio_bytes_io.seek(0)
-                        
-                        # Store the audio bytes in a session state variable
-                        st.session_state.audio_bytes = audio_bytes_io.getvalue()
-                        
-                        # Append the text message to the chat history
-                        st.session_state.chat_history.append(("Assistant", response_text))
-                        
+                        # --- Run agent and get response ---
+                        with st.spinner("Thinking..."):
+                            response = st.session_state.agent.invoke({"input": user_input})
+                            response_text = response['output']
+                            
+                            st.session_state.chat_history.append(("Assistant", response_text))
+                            
+                            # Generate and store audio bytes for the new response
+                            tts = gTTS(response_text, lang='en')
+                            audio_bytes_io = io.BytesIO()
+                            tts.write_to_fp(audio_bytes_io)
+                            audio_bytes_io.seek(0)
+                            st.session_state.last_audio_bytes = audio_bytes_io.getvalue()
+                            
+                        # --- End of agent response ---
                         st.rerun()
                     except Exception as e:
                         st.error(f"Error: {e}")
+
+            # Step 2: Play the audio on the final rerun after all messages are in state
+            if 'last_audio_bytes' in st.session_state and st.session_state.last_audio_bytes:
+                # Use a dummy chat message to hold the audio player visually
+                with st.chat_message("Assistant"):
+                    st.audio(st.session_state.last_audio_bytes, format='audio/mp3', autoplay=True, loop=False)
+                st.session_state.last_audio_bytes = None  # Clear the audio after playing to prevent repetition
+
         else:
             st.warning("Chat functionality is disabled because the CSV file was not found.")
 
 if __name__ == "__main__":
     main()
+
 
 
 
