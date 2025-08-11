@@ -69,7 +69,7 @@ def main():
     col1, col2 = st.columns([1, 2])
 
     with col1:
-        st.subheader("📊 Live CSV Data")
+        st.subheader("📊 Live Data")
         
         df = load_csv_data(local_csv_path)
         if df is not None:
@@ -79,7 +79,7 @@ def main():
             st.rerun()
 
     with col2:
-        st.subheader("💬 Continuous Chat with CSV")
+        st.subheader("💬 Chat with data")
 
         if st.session_state.agent is not None:
             chat_container = st.container()
@@ -153,6 +153,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
